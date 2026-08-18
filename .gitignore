@@ -1,0 +1,31 @@
+# Data and results
+extracted_results*/
+real_data*/
+results_real*/
+synthetic_data*/
+synthetic_data_mat*/
+figures*/
+Results*/
+
+# Scripts not needed for deployment
+prep_and_run*.py
+run_local.py
+
+# LaTeX
+*.tex
+
+# Archives
+*.zip
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS
+.DS_Store
+
+# Claude
+.claude/
+CLAUDE.md
+STATISTICS_GUIDE.md
