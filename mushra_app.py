@@ -27,6 +27,8 @@ import warnings
 import zipfile
 from pathlib import Path
 
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -141,7 +143,7 @@ def _show_table(label: str, df: pd.DataFrame, csv_path: Path) -> None:
         )
 
 
-def _show_figure(fig_path: Path) -> None:
+def _show_figure(fig_path: Path, key_suffix: str = "") -> None:
     if not fig_path.exists():
         st.info("No figure produced.")
         return
@@ -151,8 +153,48 @@ def _show_figure(fig_path: Path) -> None:
         data=fig_path.read_bytes(),
         file_name=fig_path.name,
         mime="image/png",
-        key=f"dl_fig_{fig_path}",
+        key=f"dl_fig_{fig_path}{key_suffix}",
     )
+
+
+def _generate_scenario_figure(
+    long_df: pd.DataFrame,
+    scenario: str,
+    method_order: list[str],
+    show_individual: bool = False,
+) -> bytes:
+    """Generate a single-scenario bar figure and return PNG bytes."""
+    scenario_df = long_df[long_df["Scenario"] == scenario]
+    desc = ma.descriptive_stats(scenario_df, ["audio_method"])
+
+    fig, ax = plt.subplots(1, 1, figsize=(8, 5))
+    x = np.arange(len(method_order))
+    means, errs = [], []
+    for m in method_order:
+        cell = desc[desc["audio_method"] == m]
+        means.append(float(cell["mean"].iloc[0]) if not cell.empty else np.nan)
+        errs.append(float(1.96 * cell["sem"].iloc[0]) if not cell.empty else 0)
+
+    ax.bar(x, means, 0.6, yerr=errs, capsize=4)
+    if show_individual:
+        for k, m in enumerate(method_order):
+            pts = scenario_df[scenario_df["audio_method"] == m]["score"]
+            if not pts.empty:
+                jitter = np.random.default_rng(42).uniform(-0.15, 0.15, size=len(pts))
+                ax.scatter(x[k] + jitter, pts, color="black",
+                           s=18, alpha=0.5, zorder=5, edgecolors="none")
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(method_order)
+    ax.set_ylabel("Estimated marginal mean (score)")
+    ax.set_ylim(0, 105)
+    ax.axhline(100, color="gray", linewidth=0.5, linestyle=":")
+    fig.tight_layout()
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return buf.getvalue()
 
 
 # ---------------------------------------------------------------------------
@@ -279,15 +321,46 @@ if "res" in st.session_state:
             info = res["per_judgment"][j]
             safe = str(j).replace(" ", "_").replace("/", "_")
             jdir = out_dir / safe
+            long_df = res["long_df"]
+            sub_long = long_df[long_df["judgment"] == j]
+            method_order = res["signal_order"]
 
             col_fig, col_tables = st.columns([1, 1])
             with col_fig:
-                st.subheader("Figure")
+                st.subheader("Combined Figure")
                 _show_figure(info["figure_path"])
             with col_tables:
                 st.subheader("Descriptives")
                 _show_table("descriptives", info["descriptives"],
                             jdir / "descriptives.csv")
+
+            # Per-scenario figures
+            if "Scenario" in sub_long.columns:
+                st.subheader("Per-Scenario Figures")
+                show_individual = st.checkbox(
+                    "Show individual subject scores",
+                    value=False,
+                    key=f"individual_{j}",
+                )
+                scenarios = sorted(sub_long["Scenario"].unique())
+                scenario_cols = st.columns(len(scenarios))
+                for col, scenario in zip(scenario_cols, scenarios):
+                    with col:
+                        st.markdown(f"**{scenario}**")
+                        fig_bytes = _generate_scenario_figure(
+                            sub_long, scenario, method_order,
+                            show_individual=show_individual,
+                        )
+                        st.image(fig_bytes, use_container_width=True)
+                        safe_scenario = (scenario.replace(" ", "_")
+                                         .replace(",", "").replace("=", ""))
+                        st.download_button(
+                            f"Download {safe_scenario} (PNG)",
+                            data=fig_bytes,
+                            file_name=f"{safe_scenario}.png",
+                            mime="image/png",
+                            key=f"dl_scenario_{j}_{scenario}_{show_individual}",
+                        )
 
             st.subheader("Repeated-measures ANOVA")
             _show_table("anova", info["anova"], jdir / "anova.csv")
