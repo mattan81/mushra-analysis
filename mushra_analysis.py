@@ -703,7 +703,7 @@ def plot_judgment(desc: pd.DataFrame, condition_factors: list[str],
         panels = list(condition_factors)
 
     if panels:
-        panel_levels = [sorted(desc[p].dropna().unique()) for p in panels]
+        panel_levels = [sorted(desc[p].dropna().unique(), reverse=True) for p in panels]
         panel_combos: list[tuple] = [tuple([])]
         for lvls in panel_levels:
             panel_combos = [c + (v,) for c in panel_combos for v in lvls]
