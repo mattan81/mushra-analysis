@@ -346,7 +346,70 @@ if "res" in st.session_state:
             col_fig, col_tables = st.columns([1, 1])
             with col_fig:
                 st.subheader("Combined Figure")
-                _show_figure(info["figure_path"])
+                comb_opts = st.columns(2)
+                with comb_opts[0]:
+                    comb_plot_type = st.radio(
+                        "Plot type",
+                        options=["Bar", "Box"],
+                        horizontal=True,
+                        key=f"comb_plot_type_{j}",
+                    ).lower()
+                with comb_opts[1]:
+                    comb_colors = st.checkbox(
+                        "Color by method",
+                        value=False,
+                        key=f"comb_colors_{j}",
+                    )
+                if "Scenario" in sub_long.columns:
+                    scenarios = sorted(sub_long["Scenario"].unique(), reverse=True)
+                    colors = _METHOD_COLORS[:len(method_order)] if comb_colors else None
+                    comb_fig, comb_axes = plt.subplots(
+                        len(scenarios), 1, figsize=(8, 5 * len(scenarios)))
+                    if len(scenarios) == 1:
+                        comb_axes = [comb_axes]
+                    for ax, scenario in zip(comb_axes, scenarios):
+                        sc_df = sub_long[sub_long["Scenario"] == scenario]
+                        x = np.arange(len(method_order))
+                        if comb_plot_type == "box":
+                            data = [sc_df[sc_df["audio_method"] == m]["score"].values
+                                    for m in method_order]
+                            bp = ax.boxplot(data, tick_labels=method_order,
+                                            patch_artist=True, widths=0.5,
+                                            medianprops=dict(color="black", linewidth=1.5))
+                            for k, patch in enumerate(bp["boxes"]):
+                                patch.set_facecolor(colors[k] if colors else "#1f77b4")
+                                patch.set_alpha(0.7)
+                            ax.set_ylabel("Score", fontsize=14)
+                        else:
+                            desc = ma.descriptive_stats(sc_df, ["audio_method"])
+                            means, errs = [], []
+                            for m in method_order:
+                                cell = desc[desc["audio_method"] == m]
+                                means.append(float(cell["mean"].iloc[0]) if not cell.empty else np.nan)
+                                errs.append(float(1.96 * cell["sem"].iloc[0]) if not cell.empty else 0)
+                            ax.bar(x, means, 0.6, yerr=errs, capsize=4,
+                                   color=colors if colors else None)
+                            ax.set_xticks(x)
+                            ax.set_xticklabels(method_order)
+                            ax.set_ylabel("Estimated marginal mean (score)", fontsize=14)
+                        ax.set_ylim(0, 105)
+                        ax.axhline(100, color="gray", linewidth=0.5, linestyle=":")
+                        ax.tick_params(axis="both", labelsize=13)
+                    comb_fig.tight_layout()
+                    comb_buf = io.BytesIO()
+                    comb_fig.savefig(comb_buf, format="png", dpi=150, bbox_inches="tight")
+                    plt.close(comb_fig)
+                    comb_bytes = comb_buf.getvalue()
+                    st.image(comb_bytes, use_container_width=True)
+                    st.download_button(
+                        "Download combined figure (PNG)",
+                        data=comb_bytes,
+                        file_name=f"combined_{j.replace(' ', '_')}.png",
+                        mime="image/png",
+                        key=f"dl_comb_{j}_{comb_plot_type}_{comb_colors}",
+                    )
+                else:
+                    _show_figure(info["figure_path"])
             with col_tables:
                 st.subheader("Descriptives")
                 _show_table("descriptives", info["descriptives"],
