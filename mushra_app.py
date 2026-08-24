@@ -157,38 +157,56 @@ def _show_figure(fig_path: Path, key_suffix: str = "") -> None:
     )
 
 
+_METHOD_COLORS = ["#4CAF50", "#F44336", "#FF9800", "#2196F3"]
+
+
 def _generate_scenario_figure(
     long_df: pd.DataFrame,
     scenario: str,
     method_order: list[str],
     show_individual: bool = False,
+    plot_type: str = "bar",
+    use_colors: bool = False,
 ) -> bytes:
-    """Generate a single-scenario bar figure and return PNG bytes."""
+    """Generate a single-scenario figure and return PNG bytes."""
     scenario_df = long_df[long_df["Scenario"] == scenario]
-    desc = ma.descriptive_stats(scenario_df, ["audio_method"])
+    colors = _METHOD_COLORS[:len(method_order)] if use_colors else None
 
     fig, ax = plt.subplots(1, 1, figsize=(8, 5))
     x = np.arange(len(method_order))
-    means, errs = [], []
-    for m in method_order:
-        cell = desc[desc["audio_method"] == m]
-        means.append(float(cell["mean"].iloc[0]) if not cell.empty else np.nan)
-        errs.append(float(1.96 * cell["sem"].iloc[0]) if not cell.empty else 0)
 
-    ax.bar(x, means, 0.6, yerr=errs, capsize=4)
-    if show_individual:
-        for k, m in enumerate(method_order):
-            pts = scenario_df[scenario_df["audio_method"] == m]["score"]
-            if not pts.empty:
-                jitter = np.random.default_rng(42).uniform(-0.15, 0.15, size=len(pts))
-                ax.scatter(x[k] + jitter, pts, color="black",
-                           s=18, alpha=0.5, zorder=5, edgecolors="none")
+    if plot_type == "box":
+        data = [scenario_df[scenario_df["audio_method"] == m]["score"].values
+                for m in method_order]
+        bp = ax.boxplot(data, tick_labels=method_order, patch_artist=True,
+                        widths=0.5, medianprops=dict(color="black", linewidth=1.5))
+        for i, patch in enumerate(bp["boxes"]):
+            patch.set_facecolor(colors[i] if colors else "#1f77b4")
+            patch.set_alpha(0.7)
+        ax.set_ylabel("Score", fontsize=14)
+    else:
+        desc = ma.descriptive_stats(scenario_df, ["audio_method"])
+        means, errs = [], []
+        for m in method_order:
+            cell = desc[desc["audio_method"] == m]
+            means.append(float(cell["mean"].iloc[0]) if not cell.empty else np.nan)
+            errs.append(float(1.96 * cell["sem"].iloc[0]) if not cell.empty else 0)
+        ax.bar(x, means, 0.6, yerr=errs, capsize=4,
+               color=colors if colors else None)
+        if show_individual:
+            for k, m in enumerate(method_order):
+                pts = scenario_df[scenario_df["audio_method"] == m]["score"]
+                if not pts.empty:
+                    jitter = np.random.default_rng(42).uniform(-0.15, 0.15, size=len(pts))
+                    ax.scatter(x[k] + jitter, pts, color="black",
+                               s=18, alpha=0.5, zorder=5, edgecolors="none")
+        ax.set_xticks(x)
+        ax.set_xticklabels(method_order)
+        ax.set_ylabel("Estimated marginal mean (score)", fontsize=14)
 
-    ax.set_xticks(x)
-    ax.set_xticklabels(method_order)
-    ax.set_ylabel("Estimated marginal mean (score)")
     ax.set_ylim(0, 105)
     ax.axhline(100, color="gray", linewidth=0.5, linestyle=":")
+    ax.tick_params(axis="both", labelsize=13)
     fig.tight_layout()
 
     buf = io.BytesIO()
@@ -337,19 +355,37 @@ if "res" in st.session_state:
             # Per-scenario figures
             if "Scenario" in sub_long.columns:
                 st.subheader("Per-Scenario Figures")
-                show_individual = st.checkbox(
-                    "Show individual subject scores",
-                    value=False,
-                    key=f"individual_{j}",
-                )
-                scenarios = sorted(sub_long["Scenario"].unique())
+                opt_cols = st.columns(3)
+                with opt_cols[0]:
+                    plot_type = st.radio(
+                        "Plot type",
+                        options=["Bar", "Box"],
+                        horizontal=True,
+                        key=f"plot_type_{j}",
+                    ).lower()
+                with opt_cols[1]:
+                    use_colors = st.checkbox(
+                        "Color by method",
+                        value=False,
+                        key=f"colors_{j}",
+                    )
+                with opt_cols[2]:
+                    show_individual = st.checkbox(
+                        "Show individual scores",
+                        value=False,
+                        key=f"individual_{j}",
+                        disabled=(plot_type == "box"),
+                    )
+                scenarios = sorted(sub_long["Scenario"].unique(), reverse=True)
                 scenario_cols = st.columns(len(scenarios))
                 for col, scenario in zip(scenario_cols, scenarios):
                     with col:
                         st.markdown(f"**{scenario}**")
                         fig_bytes = _generate_scenario_figure(
                             sub_long, scenario, method_order,
-                            show_individual=show_individual,
+                            show_individual=show_individual and plot_type == "bar",
+                            plot_type=plot_type,
+                            use_colors=use_colors,
                         )
                         st.image(fig_bytes, use_container_width=True)
                         safe_scenario = (scenario.replace(" ", "_")
@@ -359,7 +395,7 @@ if "res" in st.session_state:
                             data=fig_bytes,
                             file_name=f"{safe_scenario}.png",
                             mime="image/png",
-                            key=f"dl_scenario_{j}_{scenario}_{show_individual}",
+                            key=f"dl_scenario_{j}_{scenario}_{plot_type}_{use_colors}_{show_individual}",
                         )
 
             st.subheader("Repeated-measures ANOVA")
